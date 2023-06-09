@@ -1,0 +1,98 @@
+# ansible 镜像文件
+$ cat ansible dockerfile
+FROM centos:centos7
+
+# 安装ansiable、ansiable依赖、sshd、密钥依赖
+RUN yum -y install epel-release && \
+    yum -y install vconfig && \
+    yum -y install ansible && \
+    yum -y install openssh && \
+    yum -y install sshpass && \
+    yum -y install openssh-clients* && \
+    yum -y install openssh-server && \
+    ssh-keygen -A                  
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
+
+
+
+# ansible target node 配置实例
+$ cat /etc/ansible/hosts
+[k8s-cluster]
+10.60.11.109
+10.60.37.114
+10.60.7.34
+
+[k8s-nodes]
+10.60.7.34
+10.60.15.144
+
+[k8s-node01]
+10.60.37.114
+
+[k8s-node02]
+10.60.11.109
+
+
+
+
+$ cat secretKey.sh
+#!/bin/bash
+
+PASSWD="passwd"
+TERMINAL_WIDTH=`stty size |awk '{print $2}'`
+BLUE="\e[1;34m"  # tip
+GREEN="\e[1;32m"  # ok
+RED="\e[1;31m"   # fault
+DEFAULT="\e[0m"   #default
+
+echo -e "${BLUE}createKey secreting...${DEFAULT}"
+if [ -e /root/.ssh/id_dsa ]
+then
+    
+    echo -e "${GREEN}secretKey already exists${DEFAULT}"
+    echo
+else
+    ssh-keygen -t dsa -f /root/.ssh/id_dsa -N ""
+    if [ $? -eq 0 ]
+    then
+        echo -e "${GREEN}secretKey created successfully${DEFAULT}"
+    else
+        echo -e "${RED}secretKey Creation failed${DEFAULT}"
+        exit 1
+    fi
+fi
+
+echo  -e "${BLUE}FOLLOWING SSH-COPY-ID...${DEFAULT}"
+
+for i in `egrep -v '^$|#' /etc/ansible/hosts | egrep "^(([0-9]\.)|([1-9][0-9]\.)|(1[0-9][0-9]\.)|(2[0-4][0-9]\.)|(25[0-5]\.)){3}(([0-9])|([1-9][0-9])|(1[0-9][0-9])|(2[0-4][0-9])|(25[0-5]))$" | sort |uniq | sort`
+do
+    yes "#" |sed ''''${TERMINAL_WIDTH}'''q' |tr -d "\n" && echo && echo
+    echo -e "${BLUE}Network accessibility testing...${DEFAULT}"
+    ping ${i} -c2
+    if [ $? -eq 0 ]
+    then
+        echo -e "${BLUE}ssh-copy-id to ${i}...${DEFAULT}" && echo
+        sshpass -p${PASSWD} ssh-copy-id -i /root/.ssh/id_dsa.pub "-o StrictHostKeyChecking=no" $i
+        if [ $? -eq 0 ]
+        then
+            echo -e "${GREEN}${i} succeed${DEFAULT}"
+        else
+            echo -e "${RED}ssh-copy-id to ${i} failed${DEFAULT}"
+        fi
+    else
+        echo -e "${RED}${i} is unreachable${DEFAULT}"
+    fi 
+done
+
+
+
+# ansible 启动测试
+$ docker build -t ansible -f /data/app/docker/dockerFile/ansiable .
+$ docker run -itd -v /data/app/ansible/hosts:/etc/ansible/hosts -v /data/app/ansible/secretKey.sh:/root/secretKey.sh --name "ansible" ansible
+$ docker exec -it ansible /bin/bash
+$ ansible --version
+$ bash /root/secretKey.sh
+$ ansible all -m ping
+...
